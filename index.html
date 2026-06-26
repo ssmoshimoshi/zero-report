@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+   <meta charset="utf-8">
+   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+   <title>Zero Cafe Workspace</title>
+   <script src="https://cdn.tailwindcss.com"></script>
+   <style>
+       body { font-family: sans-serif; background-color: #E5E7EB; }
+       .no-scrollbar::-webkit-scrollbar { display: none; }
+       .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+   </style>
+</head>
+<body class="text-gray-800 antialiased h-screen flex justify-center overflow-hidden">
+<div id="app-root" class="w-full max-w-md bg-gray-50 h-full flex flex-col relative shadow-2xl overflow-hidden">
+   <!-- Konten Render Otomatis -->
+</div>
+
+<!-- Modal Preview -->
+<div id="previewModal" class="fixed inset-0 bg-black bg-opacity-60 hidden flex justify-center items-center z-50 p-4">
+   <div class="bg-white w-full max-w-md rounded-2xl shadow-2xl flex flex-col max-h-[90vh]">
+       <div class="p-4 border-b font-bold flex justify-between items-center">
+           <span class="text-lg uppercase tracking-wider">PREVIEW LAPORAN</span>
+           <button onclick="closePreview()" class="text-red-500 font-bold text-sm">BATAL</button>
+       </div>
+       <div id="previewContent" class="p-5 overflow-y-auto flex-1 text-sm bg-gray-50"></div>
+       <div class="p-4 border-t bg-white rounded-b-2xl">
+           <button onclick="submitReport()" id="btnConfirmSubmit" class="w-full py-4 bg-black text-white rounded-xl font-bold uppercase tracking-wider">KIRIM LAPORAN SEKARANG</button>
+       </div>
+   </div>
+</div>
+
+<!-- Toast Notification -->
+<div id="toastNotification" class="fixed bottom-10 left-1/2 transform -translate-x-1/2 bg-black text-white px-6 py-3 rounded-xl shadow-2xl z-50 text-sm font-bold tracking-wider uppercase transition-opacity duration-300 opacity-0 pointer-events-none">
+   Pesan
+</div>
+
+<script>
+let AppState = {
+   role: localStorage.getItem('zc_role') || null,
+   menu: 'select_report',
+   currentTab: 1,
+   isLoadingData: false,
+   dashboardData: null
+};
+
+const masterStaff = [
+   { id: 1, nama: 'Amel', posisi: 'Barista' },
+   { id: 2, nama: 'Irma', posisi: 'Waitres' },
+   { id: 3, nama: 'Fitri', posisi: 'Kitchen' },
+   { id: 4, nama: 'Syarif', posisi: 'Barista' },
+   { id: 5, nama: 'Reni', posisi: 'Kitchen' },
+   { id: 6, nama: 'Gita', posisi: 'Barista' }
+];
+
+let form = {
+   type: 'daily',
+   tanggal: new Date().toISOString().split('T')[0],
+   bulan: new Date().toISOString().substring(0, 7),
+   periode: '',
+   supervisor: '',
+   shift: '',
+   outlet: 'Perintis',
+   penjualan: { target: null, shift1: null, shift2: null, transaksi: null },
+   produk: { makanan: ['', '', ''], minuman: ['', '', ''] },
+   kas: { modalAwal: 200000, audit: [] },
+   staff: [],
+   briefing: { evaluasi: '', fokus: '' },
+   qc: {
+       espresso: { jam: '', status: '', keterangan: '' },
+       items: []
+   },
+   feedback: { items: [], totalKomplain: 0, totalRemake: 0, analisisRemake: '' },
+   fasilitas: [],
+   bahan: [],
+   penutup: { kendala: '', rekomendasi: '' },
+   
+   weekly: { 
+       salesHarian: [
+           {hari: 'Senin', target: null, real: null}, {hari: 'Selasa', target: null, real: null},
+           {hari: 'Rabu', target: null, real: null}, {hari: 'Kamis', target: null, real: null},
+           {hari: 'Jumat', target: null, real: null}, {hari: 'Sabtu', target: null, real: null}, {hari: 'Minggu', target: null, real: null}
+       ],
+       produk: { topMinuman: ['','',''], bottomMinuman: ['','',''], topMakanan: ['','',''], bottomMakanan: ['','',''] },
+       komplain: { total: null, remake: null, penyebab: '' },
+       kendalaUtama: '',
+       staff: [],
+       rencana: '',
+       kebutuhan: ''
+   },
+   
+   monthly: {
+       ringkasan: { pencapaian: '', masalah: '', kesimpulan: '' },
+       sales: { total: null, transaksi: null, rataRata: null, target: null, persen: null },
+       produk: { top: ['','','','',''], bottom: ['',''] },
+       operasional: { kepatuhanSop: null, telat: null, teguran: null, coaching: null, penyebab: '' },
+       qc: { komplain: null, remake: null, penyebab: '', espresso: null, susu: null, rekomendasi: '' },
+       fasilitas: { pengeluaran: null, eskalasi: null },
+       rencana: { strategi: '', target: null, gm: '' },
+       evaluasi: { berhasil: '', sulit: '', skill: '', ratingKerja: 10 }
+   }
+};
+
+function showToast(message, isError = false) {
+   const toast = document.getElementById('toastNotification');
+   toast.innerText = message;
+   toast.style.backgroundColor = isError ? '#DC2626' : '#000000';
+   toast.classList.remove('opacity-0');
+   setTimeout(() => { toast.classList.add('opacity-0'); }, 3000);
+}
+
+function fmtNum(num) {
+   return num ? new Intl.NumberFormat('id-ID').format(num) : '';
+}
+
+function renderApp() {
+   const root = document.getElementById('app-root');
+   if (AppState.role === null) {
+       root.innerHTML = getLoginTemplate();
+   } else if (AppState.role === 'SPV') {
+       if (AppState.menu === 'select_report') root.innerHTML = getSPVMenuTemplate();
+       else if (AppState.menu === 'form_daily') root.innerHTML = getDailyFormTemplate();
+       else if (AppState.menu === 'form_weekly') root.innerHTML = getWeeklyFormTemplate();
+       else if (AppState.menu === 'form_monthly') root.innerHTML = getMonthlyFormTemplate();
+   } else if (AppState.role === 'GM') {
+       root.innerHTML = getGMDashboardTemplate();
+   }
+}
+
+function getLoginTemplate() {
+   return `
+   <div class="flex flex-col h-full bg-white p-8 justify-center items-center text-center">
+       <h1 class="text-4xl font-black mb-2 uppercase">ZERO CAFE</h1>
+       <p class="text-sm text-gray-500 font-medium mb-12 uppercase tracking-widest">Workspace</p>
+       <button onclick="loginAs('SPV')" class="w-full py-4 mb-4 bg-black text-white rounded-xl font-bold uppercase tracking-wider">AKSES SUPERVISOR</button>
+       <button onclick="loginAs('GM')" class="w-full py-4 bg-gray-100 text-black rounded-xl font-bold uppercase tracking-wider">AKSES MANAGER</button>
+   </div>`;
+}
+
+function getSPVMenuTemplate() {
+   return `
+   <div class="flex flex-col h-full bg-gray-50 p-6 justify-center">
+       <header class="flex justify-between items-center mb-8 absolute top-6 left-6 right-6">
+           <h1 class="text-xl font-black uppercase tracking-tight">ZERO WORKSPACE</h1>
+           <button onclick="logout()" class="text-gray-400 text-xs font-bold uppercase border px-3 py-1 rounded-full">KELUAR</button>
+       </header>
+       <div class="space-y-4 w-full">
+           <h3 class="text-xs font-black text-gray-400 uppercase tracking-widest mb-2 text-center">Pilih Jenis Laporan</h3>
+           <button onclick="openForm('daily')" class="w-full bg-white p-5 rounded-2xl shadow-sm border text-left flex justify-between items-center hover:border-black transition">
+               <div><h2 class="font-black text-base">LAPORAN HARIAN</h2><p class="text-[11px] text-gray-400 font-bold mt-0.5">Daily Report Shift</p></div>
+               <span class="text-gray-400 font-bold">→</span>
+           </button>
+           <button onclick="openForm('weekly')" class="w-full bg-white p-5 rounded-2xl shadow-sm border text-left flex justify-between items-center hover:border-black transition">
+               <div><h2 class="font-black text-base">LAPORAN MINGGUAN</h2><p class="text-[11px] text-gray-400 font-bold mt-0.5">Weekly Rekap Penjualan</p></div>
+               <span class="text-gray-400 font-bold">→</span>
+           </button>
+           <button onclick="openForm('monthly')" class="w-full bg-black p-5 rounded-2xl shadow-md border text-left flex justify-between items-center hover:bg-gray-900 transition">
+               <div><h2 class="font-black text-base text-white">LAPORAN BULANAN</h2><p class="text-[11px] text-gray-400 font-bold mt-0.5">Monthly Executive Summary</p></div>
+               <span class="text-white font-bold">→</span>
+           </button>
+       </div>
+   </div>`;
+}
+
+function getDailyFormTemplate() {
+   const tabs = ['PENJUALAN', 'KAS', 'STAFF', 'BRIEFING', 'QC', 'FEEDBACK', 'FASILITAS', 'PENUTUP'];
+   let tabsHtml = '';
+   for (let i = 0; i < tabs.length; i++) {
+       const isActive = AppState.currentTab === (i + 1);
+       tabsHtml += `<button onclick="switchTab(${i + 1})" class="px-4 py-2 rounded-full text-[10px] font-bold uppercase whitespace-nowrap ${isActive ? 'bg-black text-white' : 'bg-gray-200 text-gray-600'}">${tabs[i]}</button>`;
+   }
+   
+   let contentHtml = '';
+   if (AppState.currentTab === 1) {
+       contentHtml = `
+       <div class="bg-white p-5 rounded-2xl shadow-sm border mb-4 space-y-3">
+           <h2 class="font-black text-sm mb-2">IDENTITAS & SHIFT</h2>
+           <div class="grid grid-cols-2 gap-2">
+               <div><label class="block text-[10px] font-bold text-gray-400 uppercase mb-1">Nama Supervisor</label><input type="text" class="w-full bg-gray-50 border rounded-lg p-2.5 text-sm font-bold" value="${form.supervisor}" onchange="handleDirectInput('supervisor', this.value)"></div>
+               <div><label class="block text-[10px] font-bold text-gray-400 uppercase mb-1">Jam Shift</label><input type="text" class="w-full bg-gray-50 border rounded-lg p-2.5 text-sm font-bold" placeholder="Contoh: 12.00 - 21.00" value="${form.shift}" onchange="handleDirectInput('shift', this.value)"></div>
+           </div>
+           <div><label class="block text-[10px] font-bold text-gray-400 uppercase mb-1">Tanggal Laporan</label><input type="date" class="w-full bg-gray-50 border rounded-lg p-2.5 text-sm font-bold" value="${form.tanggal}" onchange="handleDirectInput('tanggal', this.value)"></div>
+       </div>
+       <div class="bg-white p-5 rounded-2xl shadow-sm border mb-4 space-y-3">
+           <h2 class="font-black text-sm mb-2">RINGKASAN PENJUALAN</h2>
+           <div class="grid grid-cols-2 gap-2">
+               <div><label class="block text-[10px] font-bold text-gray-500 mb-1">Omset 08:00 - 17:00 (Rp)</label><input type="tel" class="w-full bg-gray-50 border rounded-lg p-2.5 text-sm font-bold text-green-600" value="${fmtNum(form.penjualan.shift1)}" oninput="handleNestedMoney('penjualan.shift1', this.value, this)"></div>
+               <div><label class="block text-[10px] font-bold text-gray-500 mb-1">Omset 17:00 - 20:30 (Rp)</label><input type="tel" class="w-full bg-gray-50 border rounded-lg p-2.5 text-sm font-bold text-green-600" value="${fmtNum(form.penjualan.shift2)}" oninput="handleNestedMoney('penjualan.shift2', this.value, this)"></div>
+           </div>
+           <div><label class="block text-[10px] font-bold text-gray-500 mb-1">Total Struk Transaksi</label><input type="tel" class="w-full bg-gray-50 border rounded-lg p-2.5 text-sm font-bold" value="${form.penjualan.transaksi || ''}" placeholder="Contoh: 50" oninput="handleDirectInput('penjualan.transaksi', this.value.replace(/[^0-9]/g, ''))"></div>
+       </div>
+       <div class="bg-white p-5 rounded-2xl shadow-sm border mb-4 space-y-3">
+           <h2 class="font-black text-sm mb-2">TOP 3 MAKANAN</h2>
+           <div class="flex gap-2"><span class="font-bold text-gray-400 mt-2">1</span><input type="text" class="w-full bg-gray-50 border rounded-lg p-2 text-sm" placeholder="Makanan 1" value="${form.produk.makanan[0]}" onchange="handleDirectInput('produk.makanan.0', this.value)"></div>
+           <div class="flex gap-2"><span class="font-bold text-gray-400 mt-2">2</span><input type="text" class="w-full bg-gray-50 border rounded-lg p-2 text-sm" placeholder="Makanan 2" value="${form.produk.makanan[1]}" onchange="handleDirectInput('produk.makanan.1', this.value)"></div>
+           <div class="flex gap-2"><span class="font-bold text-gray-400 mt-2">3</span><input type="text" class="w-full bg-gray-50 border rounded-lg p-2 text-sm" placeholder="Makanan 3" value="${form.produk.makanan[2]}" onchange="handleDirectInput('produk.makanan.2', this.value)"></div>
+       </div>
+       <div class="bg-white p-5 rounded-2xl shadow-sm border space-y-3">
+           <h2 class="font-black text-sm mb-2">TOP 3 MINUMAN</h2>
+           <div class="flex gap-2"><span class="font-bold text-gray-400 mt-2">1</span><input type="text" class="w-full bg-gray-50 border rounded-lg p-2 text-sm" placeholder="Minuman 1" value="${form.produk.minuman[0]}" onchange="handleDirectInput('produk.minuman.0', this.value)"></div>
+           <div class="flex gap-2"><span class="font-bold text-gray-400 mt-2">2</span><input type="text" class="w-full bg-gray-50 border rounded-lg p-2 text-sm" placeholder="Minuman 2" value="${form.produk.minuman[1]}" onchange="handleDirectInput('produk.minuman.1', this.value)"></div>
+           <div class="flex gap-2"><span class="font-bold text-gray-400 mt-2">3</span><input type="text" class="w-full bg-gray-50 border rounded-lg p-2 text-sm" placeholder="Minuman 3" value="${form.produk.minuman[2]}" onchange="handleDirectInput('produk.minuman.2', this.value)"></div>
+       </div>
+       `;
+   } else if (AppState.currentTab === 2) {
+       let auditHtml = (form.kas.audit || []).map((a, i) => `
+       <div class="bg-gray-50 p-4 border rounded-xl mb-3 relative">
+           <button onclick="removeAudit(${i})" class="absolute top-2 right-3 text-red-500 font-bold text-xs">HAPUS</button>
+           <div class="grid grid-cols-2 gap-3 mt-4">
+               <div><label class="text-[10px] font-bold text-gray-500 uppercase">Jam Audit</label><input type="time" class="w-full bg-white border rounded p-2 text-sm" value="${a.jam || ''}" onchange="handleDirectInput('kas.audit.${i}.jam', this.value)"></div>
+               <div><label class="text-[10px] font-bold text-gray-500 uppercase">Kas Setelah Audit (Rp)</label><input type="tel" class="w-full bg-white border rounded p-2 text-sm" value="${fmtNum(a.aktual)}" oninput="handleMoneyInput('kas.audit.${i}.aktual', this.value, this)"></div>
+               <div><label class="text-[10px] font-bold text-gray-500 uppercase">Qris (Rp)</label><input type="tel" class="w-full bg-white border rounded p-2 text-sm text-blue-600" value="${fmtNum(a.qris)}" oninput="handleMoneyInput('kas.audit.${i}.qris', this.value, this)"></div>
+               <div><label class="text-[10px] font-bold text-gray-500 uppercase">Tunai (Rp)</label><input type="tel" class="w-full bg-white border rounded p-2 text-sm text-green-600" value="${fmtNum(a.tunai)}" oninput="handleMoneyInput('kas.audit.${i}.tunai', this.value, this)"></div>
+               <div class="col-span-2"><label class="text-[10px] font-bold text-gray-500 uppercase">Keterangan / Temuan</label><input type="text" class="w-full bg-white border rounded p-2 text-sm" value="${a.keterangan || ''}" onchange="handleDirectInput('kas.audit.${i}.keterangan', this.value)"></div>
+           </div>
+       </div>`).join('');
+      
+       contentHtml = `
+       <div class="bg-white p-5 rounded-2xl shadow-sm border mb-4">
+           <h2 class="font-black text-sm mb-4">MODAL AWAL KASIR</h2>
+           <input type="tel" class="w-full bg-gray-50 border rounded-lg p-3 font-bold text-lg" value="${fmtNum(form.kas.modalAwal)}" oninput="handleMoneyInput('kas.modalAwal', this.value, this)">
+       </div>
+       <div class="bg-white p-5 rounded-2xl shadow-sm border">
+           <div class="flex justify-between items-center mb-4">
+               <h2 class="font-black text-sm">AUDIT KAS MENDADAK</h2>
+               <button onclick="addAudit()" class="text-[10px] bg-black text-white px-3 py-2 rounded font-bold">TAMBAH</button>
+           </div>
+           ${auditHtml || '<p class="text-xs text-gray-400 text-center">Belum ada audit kas.</p>'}
+       </div>`;
+   }
+   else if (AppState.currentTab === 3) {
+       let staffOptions = '<option value="">PILIH STAFF</option>';
+       masterStaff.forEach(s => { staffOptions += `<option value="${s.id}">${s.nama} (${s.posisi})</option>`; });
+      
+       let html = form.staff.map((s, i) => `
+       <div class="p-4 border rounded-xl mb-3 bg-gray-50">
+           <div class="flex justify-between items-center mb-3">
+               <p class="font-black text-sm text-black">${s.nama} <span class="font-normal text-gray-500 text-xs">(${s.posisi})</span></p>
+               <button onclick="removeStaff(${i})" class="text-red-500 font-bold text-xs bg-red-50 px-2 py-1 rounded">HAPUS</button>
+           </div>
+           <div class="grid grid-cols-2 gap-2 mb-2">
+               <div>
+                   <label class="text-[10px] font-bold text-gray-400 uppercase mb-1 block">Status Kehadiran</label>
+                   <select class="w-full bg-white border border-gray-200 rounded-lg p-2 text-sm font-bold ${s.status === 'Telat' ? 'text-red-500' : 'text-green-600'}" onchange="handleDirectInput('staff.${i}.status', this.value); renderApp();">
+                       <option value="Hadir" ${s.status === 'Hadir' ? 'selected' : ''}>Hadir</option>
+                       <option value="Telat" ${s.status === 'Telat' ? 'selected' : ''}>Telat</option>
+                   </select>
+               </div>
+               <div>
+                   <label class="text-[10px] font-bold text-gray-400 uppercase mb-1 block">Keramahan Terlewat?</label>
+                   <select class="w-full bg-white border border-gray-200 rounded-lg p-2 text-sm font-bold ${s.keramahan === 'Ya' ? 'text-red-500' : 'text-gray-600'}" onchange="handleDirectInput('staff.${i}.keramahan', this.value); renderApp();">
+                       <option value="Tidak" ${s.keramahan === 'Tidak' ? 'selected' : ''}>Tidak</option>
+                       <option value="Ya" ${s.keramahan === 'Ya' ? 'selected' : ''}>Ya</option>
+                   </select>
+               </div>
+           </div>
+           <div>
+               <input type="text" class="w-full bg-white border border-gray-200 rounded-lg p-2 text-sm" placeholder="Catatan khusus (Opsional)" value="${s.keterangan || ''}" onchange="handleDirectInput('staff.${i}.keterangan', this.value)">
+           </div>
+       </div>`).join('');
+      
+       contentHtml = `
+       <div class="bg-white p-5 rounded-2xl shadow-sm border mb-4">
+           <h2 class="font-black text-sm mb-4">ABSENSI & KEPATUHAN STAFF</h2>
+           <div class="flex gap-2 mb-6 border-b pb-4">
+               <select id="staffSelect" class="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-3 text-sm">${staffOptions}</select>
+               <button onclick="addStaff()" class="bg-black text-white px-4 py-2 rounded-lg text-xs font-bold shadow-md">TAMBAH</button>
+           </div>
+           ${html || '<p class="text-xs text-gray-400 text-center font-bold">Belum ada staff yang ditambahkan.</p>'}
+       </div>`;
+   } else if (AppState.currentTab === 4) {
+       contentHtml = `
+       <div class="bg-white p-5 rounded-2xl shadow-sm border mb-4">
+           <h2 class="font-black text-sm mb-2">EVALUASI KEMARIN</h2>
+           <p class="text-[10px] text-gray-400 font-bold mb-3">Tuliskan kendala hari sebelumnya untuk diperbaiki.</p>
+           <textarea class="w-full bg-gray-50 border rounded-lg p-3 text-sm min-h-[90px]" placeholder="Evaluasi shift kemarin..." onchange="handleDirectInput('briefing.evaluasi', this.value)">${form.briefing.evaluasi || ''}</textarea>
+       </div>
+       <div class="bg-white p-5 rounded-2xl shadow-sm border">
+           <h2 class="font-black text-sm mb-2">FOKUS BRIEFING HARI INI</h2>
+           <p class="text-[10px] text-gray-400 font-bold mb-3">Tuliskan arahan dan target untuk tim di shift ini.</p>
+           <textarea class="w-full bg-gray-50 border rounded-lg p-3 text-sm min-h-[90px]" placeholder="Area yang harus di fokuskan..." onchange="handleDirectInput('briefing.fokus', this.value)">${form.briefing.fokus}</textarea>
+       </div>`;
+   } else if (AppState.currentTab === 5) {
+       let qcItemsHtml = form.qc.items.map((q, i) => `
+       <div class="p-4 border rounded-xl mb-3 bg-gray-50 relative shadow-sm">
+           <button onclick="removeQc(${i})" class="absolute top-4 right-4 text-red-500 font-bold text-[10px] bg-red-50 px-2 py-1 rounded">HAPUS</button>
+           <div class="grid grid-cols-2 gap-3 mt-4">
+               <div><label class="text-[10px] font-bold text-gray-500 uppercase">Waktu QC</label><input type="time" class="w-full border border-gray-200 bg-white rounded p-2 text-sm font-bold" value="${q.jam || ''}" onchange="handleDirectInput('qc.items.${i}.jam', this.value)"></div>
+               <div><label class="text-[10px] font-bold text-gray-500 uppercase">Jenis / Nama QC</label><input type="text" class="w-full border border-gray-200 bg-white rounded p-2 text-sm" placeholder="Nasi goreng, Sample minuman..." value="${q.nama || ''}" onchange="handleDirectInput('qc.items.${i}.nama', this.value)"></div>
+               <div class="col-span-2"><label class="text-[10px] font-bold text-gray-500 uppercase">Hasil QC</label><input type="text" class="w-full border border-gray-200 bg-white rounded p-2 text-sm" placeholder="Sesuai standar / Tidak sesuai..." value="${q.status || ''}" onchange="handleDirectInput('qc.items.${i}.status', this.value)"></div>
+               <div class="col-span-2"><label class="text-[10px] font-bold text-gray-500 uppercase">Masalah & Tindakan Koreksi</label><input type="text" class="w-full border border-gray-200 bg-white rounded p-2 text-sm" placeholder="Apa yang dilakukan..." value="${q.keterangan || ''}" onchange="handleDirectInput('qc.items.${i}.keterangan', this.value)"></div>
+           </div>
+       </div>`).join('');
+       contentHtml = `
+       <div class="bg-white p-5 rounded-2xl shadow-sm border mb-4">
+           <h2 class="font-black text-sm mb-4 border-b pb-2">QC ESPRESSO (WAJIB)</h2>
+           <div class="grid grid-cols-2 gap-3">
+               <div><label class="text-[10px] font-bold text-gray-500 uppercase">Jam Kalibrasi</label><input type="time" class="w-full bg-gray-50 border border-gray-200 rounded-lg p-2.5 text-sm font-bold" value="${form.qc.espresso.jam || ''}" onchange="handleDirectInput('qc.espresso.jam', this.value)"></div>
+               <div>
+                   <label class="text-[10px] font-bold text-gray-500 uppercase">Kondisi</label>
+                   <select class="w-full bg-gray-50 border border-gray-200 rounded-lg p-2.5 text-sm font-bold" onchange="handleDirectInput('qc.espresso.status', this.value)">
+                       <option value="">Pilih Status</option>
+                       <option value="Sesuai" ${form.qc.espresso.status === 'Sesuai' ? 'selected' : ''}>Sesuai Standar</option>
+                       <option value="Adjust" ${form.qc.espresso.status === 'Adjust' ? 'selected' : ''}>Butuh Adjust</option>
+                   </select>
+               </div>
+               <div class="col-span-2">
+                   <label class="text-[10px] font-bold text-gray-500 uppercase">Keterangan Adjust</label>
+                   <input type="text" class="w-full bg-gray-50 border border-gray-200 rounded-lg p-2.5 text-sm" placeholder="Contoh: Ubah grind size karena..." value="${form.qc.espresso.keterangan || ''}" onchange="handleDirectInput('qc.espresso.keterangan', this.value)">
+               </div>
+           </div>
+       </div>
+       <div class="bg-white p-5 rounded-2xl shadow-sm border">
+           <div class="flex justify-between items-center mb-4">
+               <h2 class="font-black text-sm">QC MAKANAN / MINUMAN</h2>
+               <button onclick="addQc()" class="text-[10px] bg-black text-white px-3 py-2 rounded font-bold shadow">TAMBAH ITEM</button>
+           </div>
+           ${qcItemsHtml || '<p class="text-xs text-gray-400 text-center font-bold">Tekan tambah untuk mendata QC menu lain.</p>'}
+       </div>`;
+   }
+   else if (AppState.currentTab === 6) {
+       let feedbackHtml = form.feedback.items.map((fb, i) => `
+       <div class="p-4 border rounded-xl mb-3 bg-gray-50 relative shadow-sm">
+           <button onclick="removeFeedback(${i})" class="absolute top-4 right-4 text-red-500 font-bold text-[10px] bg-red-50 px-2 py-1 rounded">HAPUS</button>
+           <div class="grid grid-cols-2 gap-3 mt-4">
+               <div><label class="text-[10px] font-bold text-gray-500 uppercase">Waktu</label><input type="time" class="w-full border border-gray-200 bg-white rounded p-2 text-sm font-bold" value="${fb.jam || ''}" onchange="handleDirectInput('feedback.items.${i}.jam', this.value)"></div>
+               <div><label class="text-[10px] font-bold text-gray-500 uppercase">Inisial Customer</label><input type="text" class="w-full border border-gray-200 bg-white rounded p-2 text-sm" placeholder="Contoh: NN" value="${fb.inisial || ''}" onchange="handleDirectInput('feedback.items.${i}.inisial', this.value)"></div>
+               <div class="col-span-2"><label class="text-[10px] font-bold text-gray-500 uppercase">Isi Komplain / Feedback</label><textarea class="w-full border border-gray-200 bg-white rounded p-2 text-sm min-h-[60px]" placeholder="Apa yang dikatakan customer?" onchange="handleDirectInput('feedback.items.${i}.isi', this.value)">${fb.isi || ''}</textarea></div>
+               <div><label class="text-[10px] font-bold text-gray-500 uppercase">Produk Pengganti</label><input type="text" class="w-full border border-gray-200 bg-white rounded p-2 text-sm" placeholder="(Kosong jika tidak ada)" value="${fb.remake || ''}" onchange="handleDirectInput('feedback.items.${i}.remake', this.value)"></div>
+               <div>
+                   <label class="text-[10px] font-bold text-gray-500 uppercase">Eskalasi GM?</label>
+                   <select class="w-full border border-gray-200 bg-white rounded p-2 text-sm" onchange="handleDirectInput('feedback.items.${i}.eskalasi', this.value)">
+                       <option value="Tidak" ${fb.eskalasi === 'Tidak' ? 'selected' : ''}>Tidak</option>
+                       <option value="Ya" ${fb.eskalasi === 'Ya' ? 'selected' : ''}>Ya</option>
+                   </select>
+               </div>
+               <div class="col-span-2"><label class="text-[10px] font-bold text-gray-500 uppercase">Tindakan / Respon SPV</label><textarea class="w-full border border-gray-200 bg-white rounded p-2 text-sm min-h-[60px]" placeholder="Tindakan yang diambil..." onchange="handleDirectInput('feedback.items.${i}.respon', this.value)">${fb.respon || ''}</textarea></div>
+           </div>
+       </div>`).join('');
+       
+       let analisisHtml = form.feedback.totalRemake >= 3 ? `
+       <div class="mt-4 pt-3 border-t border-red-100">
+           <label class="block text-[10px] font-bold text-red-500 uppercase mb-1">Analisis (Karena Remake >= 3)</label>
+           <textarea class="w-full bg-red-50 border border-red-200 rounded-lg p-2.5 text-sm min-h-[60px]" placeholder="Jelaskan analisis penyebab dominan..." onchange="handleDirectInput('feedback.analisisRemake', this.value)">${form.feedback.analisisRemake || ''}</textarea>
+       </div>
+       ` : '';
+
+       contentHtml = `
+       <div class="bg-white p-5 rounded-2xl shadow-sm border mb-4">
+           <div class="flex justify-between items-center mb-4 border-b pb-2">
+               <h2 class="font-black text-sm">FEEDBACK & KOMPLAIN</h2>
+               <button onclick="addFeedback()" class="text-[10px] bg-black text-white px-3 py-2 rounded font-bold shadow">TAMBAH</button>
+           </div>
+           ${feedbackHtml || '<p class="text-xs text-gray-400 text-center font-bold">Belum ada komplain atau feedback tercatat.</p>'}
+       </div>
+       <div class="bg-white p-5 rounded-2xl shadow-sm border">
+           <h2 class="font-black text-sm mb-4">REKAP INSIDEN</h2>
+           <div class="grid grid-cols-2 gap-3">
+               <div>
+                   <label class="block text-[10px] font-bold text-gray-500 mb-1">Total Komplain</label>
+                   <input type="tel" class="w-full bg-gray-50 border border-gray-200 rounded-lg p-2.5 text-sm font-bold text-gray-700" value="${form.feedback.totalKomplain || 0}" oninput="handleDirectInput('feedback.totalKomplain', Number(this.value.replace(/[^0-9]/g, ''))||0)">
+               </div>
+               <div>
+                   <label class="block text-[10px] font-bold text-gray-500 mb-1">Total Remake (Maks 3)</label>
+                   <input type="tel" class="w-full bg-red-50 border border-red-100 rounded-lg p-2.5 text-sm font-bold text-red-600" value="${form.feedback.totalRemake || 0}" oninput="handleDirectInput('feedback.totalRemake', Number(this.value.replace(/[^0-9]/g, ''))||0); renderApp();">
+               </div>
+           </div>
+           ${analisisHtml}
+       </div>`;
+   }
+   else if (AppState.currentTab === 7) {
+       let fasilitasHtml = form.fasilitas.map((f, i) => `
+       <div class="p-4 border rounded-xl mb-3 bg-gray-50 relative shadow-sm">
+           <button onclick="removeFasilitas(${i})" class="absolute top-4 right-4 text-red-500 font-bold text-[10px] bg-red-50 px-2 py-1 rounded">HAPUS</button>
+           <div class="grid grid-cols-2 gap-3 mt-4">
+               <div class="col-span-2"><label class="text-[10px] font-bold text-gray-500 uppercase">Nama Fasilitas</label><input type="text" class="w-full border rounded-lg p-2 text-sm" placeholder="Contoh: AC, Kursi..." value="${f.item || ''}" onchange="handleDirectInput('fasilitas.${i}.item', this.value)"></div>
+               <div>
+                   <label class="text-[10px] font-bold text-gray-500 uppercase">Kondisi</label>
+                   <select class="w-full border rounded-lg p-2 text-sm" onchange="handleDirectInput('fasilitas.${i}.status', this.value)">
+                       <option value="">Pilih</option>
+                       <option value="Baik" ${f.status === 'Baik' ? 'selected' : ''}>Baik</option>
+                       <option value="Rusak" ${f.status === 'Rusak' ? 'selected' : ''}>Rusak</option>
+                   </select>
+               </div>
+               <div>
+                   <label class="text-[10px] font-bold text-gray-500 uppercase">Tindakan</label>
+                   <select class="w-full border rounded-lg p-2 text-sm" onchange="handleDirectInput('fasilitas.${i}.eskalasi', this.value)">
+                       <option value="">Pilih</option>
+                       <option value="Mandiri" ${f.eskalasi === 'Mandiri' ? 'selected' : ''}>Oleh SPV</option>
+                       <option value="GM" ${f.eskalasi === 'GM' ? 'selected' : ''}>Eskalasi GM</option>
+                   </select>
+               </div>
+               <div class="col-span-2"><label class="text-[10px] font-bold text-gray-500 uppercase">Keterangan Kerusakan</label><input type="text" class="w-full border rounded-lg p-2 text-sm" placeholder="Penjelasan detail..." value="${f.keterangan || ''}" onchange="handleDirectInput('fasilitas.${i}.keterangan', this.value)"></div>
+           </div>
+       </div>`).join('');
+       let bahanHtml = form.bahan.map((b, i) => `
+       <div class="p-4 border rounded-xl mb-3 bg-gray-50 relative shadow-sm">
+           <button onclick="removeBahan(${i})" class="absolute top-4 right-4 text-red-500 font-bold text-[10px] bg-red-50 px-2 py-1 rounded">HAPUS</button>
+           <div class="grid grid-cols-2 gap-3 mt-4">
+               <div class="col-span-2"><label class="text-[10px] font-bold text-gray-500 uppercase">Nama Bahan</label><input type="text" class="w-full border rounded-lg p-2 text-sm" placeholder="Contoh: Susu, Tisu..." value="${b.nama || ''}" onchange="handleDirectInput('bahan.${i}.nama', this.value)"></div>
+               <div>
+                   <label class="text-[10px] font-bold text-gray-500 uppercase">Status Stok</label>
+                   <select class="w-full border rounded-lg p-2 text-sm" onchange="handleDirectInput('bahan.${i}.ketersediaan', this.value)">
+                       <option value="">Pilih</option>
+                       <option value="Aman" ${b.ketersediaan === 'Aman' ? 'selected' : ''}>Aman</option>
+                       <option value="Menipis" ${b.ketersediaan === 'Menipis' ? 'selected' : ''}>Menipis</option>
+                       <option value="Habis/Beli" ${b.ketersediaan === 'Habis/Beli' ? 'selected' : ''}>Habis/Beli</option>
+                   </select>
+               </div>
+               <div><label class="text-[10px] font-bold text-gray-500 uppercase">Harga (Bila Beli)</label><input type="tel" class="w-full border rounded-lg p-2 text-sm font-bold text-green-600" placeholder="Rp" value="${fmtNum(b.harga)}" oninput="handleMoneyInput('bahan.${i}.harga', this.value, this)"></div>
+           </div>
+       </div>`).join('');
+       contentHtml = `
+       <div class="bg-white p-5 rounded-2xl shadow-sm border mb-4">
+           <div class="flex justify-between items-center mb-4 border-b pb-2">
+               <h2 class="font-black text-sm">FASILITAS OUTLET</h2>
+               <button onclick="addFasilitas()" class="text-[10px] bg-black text-white px-3 py-2 rounded font-bold shadow">TAMBAH</button>
+           </div>
+           ${fasilitasHtml || '<p class="text-xs text-gray-400 text-center font-bold">Belum ada data fasilitas.</p>'}
+       </div>
+       <div class="bg-white p-5 rounded-2xl shadow-sm border">
+           <div class="flex justify-between items-center mb-4 border-b pb-2">
+               <h2 class="font-black text-sm">BAHAN PENUNJANG</h2>
+               <button onclick="addBahan()" class="text-[10px] bg-black text-white px-3 py-2 rounded font-bold shadow">TAMBAH</button>
+           </div>
+           ${bahanHtml || '<p class="text-xs text-gray-400 text-center font-bold">Belum ada data bahan penunjang.</p>'}
+       </div>`;
+   }
+   else if (AppState.currentTab === 8) {
+       contentHtml = `
+       <div class="bg-white p-5 rounded-2xl shadow-sm border mb-6 space-y-4">
+           <h2 class="font-black text-sm mb-2">PENUTUP SHIFT</h2>
+           <div>
+               <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Kendala Utama</label>
+               <textarea class="w-full bg-gray-50 border rounded-lg p-3 text-sm min-h-[80px]" onchange="handleDirectInput('penutup.kendala', this.value)">${form.penutup.kendala}</textarea>
+           </div>
+           <div>
+               <label class="block text-[10px] font-bold text-gray-500 uppercase mb-1">Rekomendasi Besok</label>
+               <textarea class="w-full bg-gray-50 border rounded-lg p-3 text-sm min-h-[80px]" onchange="handleDirectInput('penutup.rekomendasi', this.value)">${form.penutup.rekomendasi}</textarea>
+           </div>
+       </div>
+       <button onclick="openPreview()" class="w-full py-4 bg-black text-white font-bold rounded-xl uppercase tracking-wider text-sm shadow-md">TINJAU & KIRIM HARIAN</button>`;
+   }
+   
+   return `
+   <div class="flex flex-col h-full bg-gray-50">
+       <header class="bg-white pt-6 pb-4 px-5 border-b flex justify-between items-center">
+           <div><h1 class="text-lg font-black uppercase">LAPORAN HARIAN</h1><p class="text-xs text-gray-500 font-bold">${form.tanggal}</p></div>
+           <button onclick="goBackMenu()" class="text-gray-400 text-xs font-bold uppercase border px-3 py-1 rounded-full">KEMBALI</button>
+       </header>
+       <div class="bg-white border-b px-5 py-2 flex gap-2 overflow-x-auto no-scrollbar z-10">${tabsHtml}</div>
+       <main class="flex-1 overflow-y-auto p-5 space-y-4 pb-24">${contentHtml}</main>
+   </div>`;
+}
+
+function getWeeklyFormTemplate() {
+   const tabs = ['SALES & PRODUK', 'STAFF & KENDALA', 'RENCANA'];
+   let tabsHtml = '';
+   for (let i = 0; i < tabs.length; i++) {
+       const isActive = AppState.currentTab === (i + 1);
+       tabsHtml += `<button onclick="switchTab(${i + 1})" class="px-4 py-2 rounded-full text-[10px] font-bold uppercase whitespace-nowrap ${isActive ? 'bg-black text-white' : 'bg-gray-200 text-gray-600'}">${tabs[i]}</button>`;
+   }
+   
+   let contentHtml = '';
+   if (AppState.currentTab === 1) {
+       let harianHtml = form.weekly.salesHarian.map((s, i) => `
+       <div class="grid grid-cols-2 gap-2 mb-2 p-2 border rounded-lg bg-gray-50">
+           <div class="col-span-2 font-bold text-xs uppercase text-gray-600">${s.hari}</div>
+           <div><label class="text-[10px] font-bold text-gray-400">Target (Rp)</label><input type="tel" class="w-full bg-white border rounded p-2 text-sm" value="${fmtNum(s.target)}" oninput="handleMoneyInput('weekly.salesHarian.${i}.target', this.value, this)"></div>
+           <div><label class="text-[10px] font-bold text-gray-400">Real (Rp)</label><input type="tel" class="w-full bg-white border rounded p-2 text-sm text-green-600 font-bold" value="${fmtNum(s.real)}" oninput="handleMoneyInput('weekly.salesHarian.${i}.real', this.value, this)"></div>
+       </div>`).join('');
+       
+       contentHtml = `
+       <div class="bg-white p-5 rounded-2xl shadow-sm border mb-4 space-y-3">
+           <div class="grid grid-cols-2 gap-2">
+               <div><label class="block text-[10px] font-bold text-gray-400 uppercase mb-1">Nama Supervisor</label><input type="text" class="w-full bg-gray-50 border rounded-lg p-2 text-sm font-bold" value="${form.supervisor}" onchange="handleDirectInput('supervisor', this.value)"></div>
+               <div><label class="block text-[10px] font-bold text-gray-400 uppercase mb-1">Periode Minggu</label><input type="text" placeholder="Contoh: 22-28 Juni" class="w-full bg-gray-50 border rounded-lg p-2 text-sm font-bold" value="${form.periode}" onchange="handleDirectInput('periode', this.value)"></div>
+           </div>
+       </div>
+       <div class="bg-white p-5 rounded-2xl shadow-sm border mb-4">
+           <h3 class="font-black text-xs uppercase tracking-wider text-gray-400 mb-3 border-b pb-2">Rekap Sales Harian</h3>
+           ${harianHtml}
+       </div>
+       <div class="bg-white p-5 rounded-2xl shadow-sm border space-y-3">
+           <h3 class="font-black text-xs uppercase tracking-wider text-gray-400 mb-2">Produk & Evaluasi</h3>
+           <div><label class="block text-[10px] font-bold text-gray-500 mb-1">Top 3 Minuman</label><input type="text" class="w-full bg-gray-50 border rounded-lg p-2 text-sm mb-1" placeholder="1. ..." value="${form.weekly.produk.topMinuman[0]}" onchange="handleDirectInput('weekly.produk.topMinuman.0', this.value)"><input type="text" class="w-full bg-gray-50 border rounded-lg p-2 text-sm mb-1" placeholder="2. ..." value="${form.weekly.produk.topMinuman[1]}" onchange="handleDirectInput('weekly.produk.topMinuman.1', this.value)"><input type="text" class="w-full bg-gray-50 border rounded-lg p-2 text-sm" placeholder="3. ..." value="${form.weekly.produk.topMinuman[2]}" onchange="handleDirectInput('weekly.produk.topMinuman.2', this.value)"></div>
+           <div><label class="block text-[10px] font-bold text-gray-500 mb-1">Bottom 3 Minuman (Perlu Tindakan)</label><textarea class="w-full bg-gray-50 border rounded-lg p-2.5 text-sm min-h-[60px]" placeholder="Sebutkan produk dan tindakannya..." onchange="handleDirectInput('weekly.produk.bottomMinuman.0', this.value)">${form.weekly.produk.bottomMinuman[0]}</textarea></div>
+       </div>`;
+   } else if (AppState.currentTab === 2) {
+       let staffOptions = '<option value="">PILIH STAFF UNTUK DIEVALUASI</option>';
+       masterStaff.forEach(s => { staffOptions += `<option value="${s.id}">${s.nama} (${s.posisi})</option>`; });
+       let staffWeeklyHtml = form.weekly.staff.map((s, i) => `
+       <div class="p-3 border rounded-xl mb-2 bg-gray-50">
+           <div class="flex justify-between items-center mb-2">
+               <p class="font-bold text-xs">${s.nama}</p>
+               <button onclick="removeWeeklyStaff(${i})" class="text-red-500 font-bold text-[10px]">HAPUS</button>
+           </div>
+           <select class="w-full border rounded p-2 text-sm mb-2" onchange="handleDirectInput('weekly.staff.${i}.status', this.value)">
+               <option value="Berkembang" ${s.status === 'Berkembang' ? 'selected' : ''}>Berkembang</option>
+               <option value="Stagnan" ${s.status === 'Stagnan' ? 'selected' : ''}>Stagnan</option>
+               <option value="Menurun" ${s.status === 'Menurun' ? 'selected' : ''}>Menurun</option>
+           </select>
+           <input type="text" class="w-full bg-white border rounded p-2 text-sm" placeholder="Alasan / Bukti..." value="${s.alasan || ''}" onchange="handleDirectInput('weekly.staff.${i}.alasan', this.value)">
+       </div>`).join('');
+       
+       contentHtml = `
+       <div class="bg-white p-5 rounded-2xl shadow-sm border mb-4 space-y-3">
+           <h3 class="font-black text-xs uppercase tracking-wider text-gray-400 mb-2 border-b pb-2">Komplain & Penggantian</h3>
+           <div class="grid grid-cols-2 gap-2">
+               <div><label class="block text-[10px] font-bold text-gray-500 mb-1">Total Komplain</label><input type="tel" class="w-full bg-gray-50 border rounded-lg p-2 text-sm font-bold" value="${form.weekly.komplain.total || ''}" oninput="handleDirectInput('weekly.komplain.total', Number(this.value.replace(/[^0-9]/g, ''))||0)"></div>
+               <div><label class="block text-[10px] font-bold text-gray-500 mb-1">Total Remake</label><input type="tel" class="w-full bg-gray-50 border rounded-lg p-2 text-sm font-bold text-red-600" value="${form.weekly.komplain.remake || ''}" oninput="handleDirectInput('weekly.komplain.remake', Number(this.value.replace(/[^0-9]/g, ''))||0)"></div>
+               <div class="col-span-2"><label class="block text-[10px] font-bold text-gray-500 mb-1">Penyebab Dominan</label><input type="text" class="w-full bg-gray-50 border rounded-lg p-2 text-sm" placeholder="Contoh: Barista salah resep..." value="${form.weekly.komplain.penyebab || ''}" onchange="handleDirectInput('weekly.komplain.penyebab', this.value)"></div>
+           </div>
+       </div>
+       <div class="bg-white p-5 rounded-2xl shadow-sm border mb-4">
+           <h3 class="font-black text-xs uppercase tracking-wider text-gray-400 mb-2 border-b pb-2">Kendala Berulang</h3>
+           <textarea class="w-full bg-gray-50 border rounded-lg p-3 text-sm min-h-[80px]" placeholder="Tulis kendala utama, frekuensi, dan upaya..." onchange="handleDirectInput('weekly.kendalaUtama', this.value)">${form.weekly.kendalaUtama}</textarea>
+       </div>
+       <div class="bg-white p-5 rounded-2xl shadow-sm border">
+           <h3 class="font-black text-xs uppercase tracking-wider text-gray-400 mb-3 border-b pb-2">Performa Barista</h3>
+           <div class="flex gap-2 mb-4">
+               <select id="weeklyStaffSelect" class="flex-1 bg-gray-50 border rounded-lg px-2 text-xs">${staffOptions}</select>
+               <button onclick="addWeeklyStaff()" class="bg-black text-white px-3 py-2 rounded-lg text-[10px] font-bold shadow">TAMBAH</button>
+           </div>
+           ${staffWeeklyHtml || '<p class="text-[10px] text-gray-400 text-center font-bold">Pilih staff untuk dievaluasi kinerjanya.</p>'}
+       </div>`;
+   } else if (AppState.currentTab === 3) {
+       contentHtml = `
+       <div class="bg-white p-5 rounded-2xl shadow-sm border mb-4">
+           <h3 class="font-black text-xs uppercase tracking-wider text-gray-400 mb-2 border-b pb-2">Rencana Perbaikan</h3>
+           <p class="text-[10px] text-gray-400 font-bold mb-3">Tuliskan maksimal 3 tindakan untuk minggu depan.</p>
+           <textarea class="w-full bg-gray-50 border rounded-lg p-3 text-sm min-h-[90px]" placeholder="1. ...&#10;2. ...&#10;3. ..." onchange="handleDirectInput('weekly.rencana', this.value)">${form.weekly.rencana}</textarea>
+       </div>
+       <div class="bg-white p-5 rounded-2xl shadow-sm border mb-6">
+           <h3 class="font-black text-xs uppercase tracking-wider text-gray-400 mb-2 border-b pb-2">Kebutuhan dari GM</h3>
+           <textarea class="w-full bg-gray-50 border rounded-lg p-3 text-sm min-h-[90px]" placeholder="Stok tambahan, perbaikan alat, pelatihan..." onchange="handleDirectInput('weekly.kebutuhan', this.value)">${form.weekly.kebutuhan}</textarea>
+       </div>
+       <button onclick="openPreview()" class="w-full py-4 bg-black text-white font-bold rounded-xl uppercase tracking-wider text-xs shadow-md">TINJAU & KIRIM MINGGUAN</button>`;
+   }
+   
+   return `
+   <div class="flex flex-col h-full bg-gray-50">
+       <header class="bg-white pt-6 pb-4 px-5 border-b flex justify-between items-center">
+           <div><h1 class="text-lg font-black uppercase">LAPORAN MINGGUAN</h1><p class="text-xs text-gray-500 font-bold">Executive Summary</p></div>
+           <button onclick="goBackMenu()" class="text-gray-400 text-xs font-bold uppercase border px-3 py-1 rounded-full">KEMBALI</button>
+       </header>
+       <div class="bg-white border-b px-5 py-2 flex gap-2 overflow-x-auto no-scrollbar z-10">${tabsHtml}</div>
+       <main class="flex-1 overflow-y-auto p-5 pb-24">${contentHtml}</main>
+   </div>`;
+}
+
+function getMonthlyFormTemplate() {
+   const tabs = ['RINGKASAN & SALES', 'OPR & QC', 'RENCANA & EVALUASI'];
+   let tabsHtml = '';
+   for (let i = 0; i < tabs.length; i++) {
+       const isActive = AppState.currentTab === (i + 1);
+       tabsHtml += `<button onclick="switchTab(${i + 1})" class="px-4 py-2 rounded-full text-[10px] font-bold uppercase whitespace-nowrap ${isActive ? 'bg-black text-white' : 'bg-gray-200 text-gray-600'}">${tabs[i]}</button>`;
+   }
+   
+   let contentHtml = '';
+   if (AppState.currentTab === 1) {
+       contentHtml = `
+       <div class="bg-white p-5 rounded-2xl border shadow-sm space-y-3 mb-4">
+           <div class="grid grid-cols-2 gap-2">
+               <div><label class="block text-[10px] font-bold text-gray-400 uppercase mb-1">Supervisor</label><input type="text" class="w-full bg-gray-50 border rounded-lg p-2.5 text-sm font-bold" value="${form.supervisor}" onchange="handleDirectInput('supervisor', this.value)"></div>
+               <div><label class="block text-[10px] font-bold text-gray-400 uppercase mb-1">Bulan</label><input type="month" class="w-full bg-gray-50 border rounded-lg p-2.5 text-sm font-bold" value="${form.bulan}" onchange="handleDirectInput('bulan', this.value)"></div>
+           </div>
+       </div>
+       <div class="bg-white p-5 rounded-2xl border shadow-sm space-y-3 mb-4">
+           <h3 class="font-black text-xs uppercase tracking-wider text-gray-400 mb-2 border-b pb-2">Data Sales</h3>
+           <div><label class="block text-[10px] font-bold text-gray-500 mb-1">Total Sales Bulanan (Rp)</label><input type="tel" class="w-full bg-black text-white rounded-lg p-3 text-lg font-bold" value="${fmtNum(form.monthly.sales.total)}" oninput="handleMoneyInput('monthly.sales.total', this.value, this)"></div>
+           <div class="grid grid-cols-2 gap-2">
+               <div><label class="block text-[10px] font-bold text-gray-500 mb-1">Target (Rp)</label><input type="tel" class="w-full bg-gray-50 border rounded-lg p-2 text-sm font-bold" value="${fmtNum(form.monthly.sales.target)}" oninput="handleMoneyInput('monthly.sales.target', this.value, this)"></div>
+               <div><label class="block text-[10px] font-bold text-gray-500 mb-1">% Tercapai</label><input type="tel" placeholder="95" class="w-full bg-gray-50 border rounded-lg p-2 text-sm font-bold text-green-600" value="${form.monthly.sales.persen || ''}" oninput="handleDirectInput('monthly.sales.persen', Number(this.value.replace(/[^0-9]/g, ''))||'')"></div>
+               <div><label class="block text-[10px] font-bold text-gray-500 mb-1">Total Transaksi</label><input type="tel" class="w-full bg-gray-50 border rounded-lg p-2 text-sm font-bold" value="${form.monthly.sales.transaksi || ''}" oninput="handleDirectInput('monthly.sales.transaksi', Number(this.value.replace(/[^0-9]/g, ''))||'')"></div>
+               <div><label class="block text-[10px] font-bold text-gray-500 mb-1">Rata-rata/Hari (Rp)</label><input type="tel" class="w-full bg-gray-50 border rounded-lg p-2 text-sm font-bold" value="${fmtNum(form.monthly.sales.rataRata)}" oninput="handleMoneyInput('monthly.sales.rataRata', this.value, this)"></div>
+           </div>
+       </div>
+       <div class="bg-white p-5 rounded-2xl border shadow-sm space-y-3">
+           <h3 class="font-black text-xs uppercase tracking-wider text-gray-400 mb-2 border-b pb-2">Top 5 Produk Terlaris</h3>
+           <textarea class="w-full bg-gray-50 border rounded-lg p-3 text-sm min-h-[90px]" placeholder="1. ...&#10;2. ...&#10;3. ...&#10;4. ...&#10;5. ..." onchange="handleDirectInput('monthly.produk.top.0', this.value)">${form.monthly.produk.top[0] || ''}</textarea>
+       </div>`;
+   } else if (AppState.currentTab === 2) {
+       contentHtml = `
+       <div class="bg-white p-5 rounded-2xl border shadow-sm space-y-3 mb-4">
+           <h3 class="font-black text-xs uppercase tracking-wider text-gray-400 mb-2 border-b pb-2">Operasional & Kepatuhan Staff</h3>
+           <div class="grid grid-cols-2 gap-2">
+               <div><label class="block text-[10px] font-bold text-gray-500 mb-1">Kepatuhan SOP (%)</label><input type="tel" class="w-full bg-gray-50 border rounded-lg p-2 text-sm font-bold" value="${form.monthly.operasional.kepatuhanSop || ''}" oninput="handleDirectInput('monthly.operasional.kepatuhanSop', Number(this.value.replace(/[^0-9]/g, ''))||'')"></div>
+               <div><label class="block text-[10px] font-bold text-gray-500 mb-1">Jml Kejadian Telat</label><input type="tel" class="w-full bg-gray-50 border rounded-lg p-2 text-sm font-bold" value="${form.monthly.operasional.telat || ''}" oninput="handleDirectInput('monthly.operasional.telat', Number(this.value.replace(/[^0-9]/g, ''))||'')"></div>
+               <div><label class="block text-[10px] font-bold text-gray-500 mb-1">Coaching 1-on-1</label><input type="tel" class="w-full bg-gray-50 border rounded-lg p-2 text-sm font-bold" value="${form.monthly.operasional.coaching || ''}" oninput="handleDirectInput('monthly.operasional.coaching', Number(this.value.replace(/[^0-9]/g, ''))||'')"></div>
+               <div class="col-span-2"><label class="block text-[10px] font-bold text-gray-500 mb-1">Penyebab Ketidakpatuhan Dominan</label><input type="text" class="w-full bg-gray-50 border rounded-lg p-2 text-sm" placeholder="Keramahan / Telat..." value="${form.monthly.operasional.penyebab || ''}" onchange="handleDirectInput('monthly.operasional.penyebab', this.value)"></div>
+           </div>
+       </div>
+       <div class="bg-white p-5 rounded-2xl border shadow-sm space-y-3 mb-4">
+           <h3 class="font-black text-xs uppercase tracking-wider text-gray-400 mb-2 border-b pb-2">Komplain & QC</h3>
+           <div class="grid grid-cols-2 gap-2">
+               <div><label class="block text-[10px] font-bold text-gray-500 mb-1">Total Komplain</label><input type="tel" class="w-full bg-gray-50 border rounded-lg p-2 text-sm font-bold" value="${form.monthly.qc.komplain || ''}" oninput="handleDirectInput('monthly.qc.komplain', Number(this.value.replace(/[^0-9]/g, ''))||'')"></div>
+               <div><label class="block text-[10px] font-bold text-gray-500 mb-1">Total Remake</label><input type="tel" class="w-full bg-gray-50 border rounded-lg p-2 text-sm font-bold text-red-600" value="${form.monthly.qc.remake || ''}" oninput="handleDirectInput('monthly.qc.remake', Number(this.value.replace(/[^0-9]/g, ''))||'')"></div>
+               <div><label class="block text-[10px] font-bold text-gray-500 mb-1">QC Espresso (%)</label><input type="tel" class="w-full bg-gray-50 border rounded-lg p-2 text-sm font-bold text-green-600" value="${form.monthly.qc.espresso || ''}" oninput="handleDirectInput('monthly.qc.espresso', Number(this.value.replace(/[^0-9]/g, ''))||'')"></div>
+               <div><label class="block text-[10px] font-bold text-gray-500 mb-1">QC Susu Steam (%)</label><input type="tel" class="w-full bg-gray-50 border rounded-lg p-2 text-sm font-bold text-green-600" value="${form.monthly.qc.susu || ''}" oninput="handleDirectInput('monthly.qc.susu', Number(this.value.replace(/[^0-9]/g, ''))||'')"></div>
+           </div>
+       </div>`;
+   } else if (AppState.currentTab === 3) {
+       contentHtml = `
+       <div class="bg-white p-5 rounded-2xl border shadow-sm space-y-3 mb-4">
+           <h3 class="font-black text-xs uppercase tracking-wider text-gray-400 mb-2 border-b pb-2">Rencana Bulan Depan</h3>
+           <div><label class="block text-[10px] font-bold text-gray-500 mb-1">Fokus Utama (Strategi)</label><textarea class="w-full bg-gray-50 border rounded-lg p-2.5 text-sm min-h-[60px]" placeholder="Keramahan, kecepatan saji..." onchange="handleDirectInput('monthly.rencana.strategi', this.value)">${form.monthly.rencana.strategi}</textarea></div>
+           <div><label class="block text-[10px] font-bold text-gray-500 mb-1">Kebutuhan dari GM</label><textarea class="w-full bg-gray-50 border rounded-lg p-2.5 text-sm min-h-[60px]" onchange="handleDirectInput('monthly.rencana.gm', this.value)">${form.monthly.rencana.gm}</textarea></div>
+       </div>
+       <div class="bg-white p-5 rounded-2xl border shadow-sm space-y-4 mb-6">
+           <h3 class="font-black text-xs uppercase tracking-wider text-gray-400 mb-2 border-b pb-2">Evaluasi Diri Supervisor</h3>
+           <div><label class="block text-[10px] font-bold text-gray-500 mb-1">Apa yang paling berhasil?</label><textarea class="w-full bg-gray-50 border rounded-lg p-2.5 text-sm" onchange="handleDirectInput('monthly.evaluasi.berhasil', this.value)">${form.monthly.evaluasi.berhasil}</textarea></div>
+           <div><label class="block text-[10px] font-bold text-gray-500 mb-1">Apa yang paling sulit?</label><textarea class="w-full bg-gray-50 border rounded-lg p-2.5 text-sm" onchange="handleDirectInput('monthly.evaluasi.sulit', this.value)">${form.monthly.evaluasi.sulit}</textarea></div>
+           <div>
+               <label class="block text-[10px] font-bold text-gray-500 mb-1">Rating Kepuasan Kerja Anda (1-10)</label>
+               <input type="range" min="1" max="10" class="w-full accent-black" value="${form.monthly.evaluasi.ratingKerja}" onchange="handleDirectInput('monthly.evaluasi.ratingKerja', Number(this.value)); document.getElementById('ratingBox').innerText = this.value">
+               <div id="ratingBox" class="text-center font-black text-xl mt-1">${form.monthly.evaluasi.ratingKerja}</div>
+           </div>
+       </div>
+       <button onclick="openPreview()" class="w-full py-4 bg-black text-white font-bold rounded-xl uppercase tracking-wider text-xs shadow-md">TINJAU & KIRIM BULANAN</button>`;
+   }
+   
+   return `
+   <div class="flex flex-col h-full bg-gray-50">
+       <header class="bg-white pt-6 pb-4 px-5 border-b flex justify-between items-center">
+           <div><h1 class="text-lg font-black uppercase">LAPORAN BULANAN</h1><p class="text-xs text-gray-500 font-bold">Zero Cafe ${form.outlet}</p></div>
+           <button onclick="goBackMenu()" class="text-gray-400 text-xs font-bold uppercase border px-3 py-1 rounded-full">KEMBALI</button>
+       </header>
+       <div class="bg-white border-b px-5 py-2.5 flex gap-2 overflow-x-auto no-scrollbar z-10">${tabsHtml}</div>
+       <main class="flex-1 overflow-y-auto p-5 pb-24">${contentHtml}</main>
+   </div>`;
+}
+
+function getGMDashboardTemplate() {
+   const months = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+   const currentMonth = months[new Date().getMonth()];
+   const currentYear = new Date().getFullYear();
+   const savedMonth = localStorage.getItem('gm_filter_month') || currentMonth;
+   const savedYear = localStorage.getItem('gm_filter_year') || currentYear.toString();
+   let monthOptions = months.map(m => `<option value="${m}" ${m === savedMonth ? 'selected' : ''}>${m}</option>`).join('');
+   let yearOptions = [currentYear - 1, currentYear, currentYear + 1].map(y => `<option value="${y}" ${y.toString() === savedYear ? 'selected' : ''}>${y}</option>`).join('');
+   let dashboardContent = '';
+   
+   if (AppState.isLoadingData) {
+       dashboardContent = '<div class="text-center p-8 text-gray-500 font-bold uppercase tracking-widest text-xs animate-pulse">MENARIK DATA DARI SPREADSHEET...</div>';
+   } else if (!AppState.dashboardData) {
+       dashboardContent = '<div class="text-center p-8 text-gray-400 font-bold uppercase tracking-widest text-[10px] border-2 border-dashed border-gray-200 rounded-2xl">Silakan tekan tombol Cari Data</div>';
+   } else {
+       const d = AppState.dashboardData;
+       dashboardContent += `
+       <div class="grid grid-cols-2 gap-3 mb-6">
+           <div class="bg-black text-white p-4 rounded-2xl shadow-md">
+               <p class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Total Omset Real</p>
+               <h3 class="text-lg font-black tracking-tight">Rp ${fmtNum(d.omsetTotal)}</h3>
+           </div>
+           <div class="bg-white border border-gray-200 p-4 rounded-2xl shadow-sm">
+               <p class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Total Transaksi</p>
+               <h3 class="text-lg font-black tracking-tight text-black">${fmtNum(d.transaksiTotal)} <span class="text-xs text-gray-400 font-bold">Struk</span></h3>
+           </div>
+           <div class="bg-red-50 border border-red-100 p-4 rounded-2xl shadow-sm col-span-2 flex justify-between items-center">
+               <div>
+                   <p class="text-[10px] font-bold text-red-400 uppercase tracking-widest mb-1">Insiden Komplain</p>
+                   <h3 class="text-lg font-black tracking-tight text-red-600">${fmtNum(d.komplainTotal)} <span class="text-xs text-red-400 font-bold">Kasus</span></h3>
+               </div>
+           </div>
+       </div>
+       <h3 class="font-black text-xs uppercase tracking-widest text-gray-400 mb-3">Arsip Laporan Tersedia</h3>`;
+       
+       if (d.listLaporan.length === 0) {
+           dashboardContent += '<div class="text-center p-6 text-gray-400 font-bold uppercase tracking-widest text-[10px] bg-white rounded-2xl border">BELUM ADA LAPORAN DI BULAN INI</div>';
+       } else {
+           dashboardContent += d.listLaporan.map(r => `
+           <div class="bg-white border border-gray-100 p-4 rounded-xl mb-3 flex justify-between items-center shadow-sm hover:border-black transition">
+               <div class="flex-1 pr-4 truncate">
+                   <p class="font-black text-sm text-gray-800 tracking-tight leading-tight truncate">${r.name.replace('.pdf', '')}</p>
+                   <p class="text-[10px] text-gray-400 font-bold uppercase mt-1 tracking-wider">${r.dateCreated}</p>
+               </div>
+               <a href="${r.url}" target="_blank" class="bg-gray-100 text-black px-4 py-3 rounded-xl text-[10px] font-bold uppercase tracking-widest hover:bg-black hover:text-white transition">BUKA</a>
+           </div>`).join('');
+       }
+   }
+   
+   return `
+   <div class="flex flex-col h-full bg-gray-50">
+       <header class="bg-white pt-6 pb-4 px-5 border-b z-10 flex justify-between items-center">
+           <div><h1 class="text-xl font-black uppercase tracking-tight">GM DASHBOARD</h1></div>
+           <button onclick="logout()" class="text-gray-400 text-xs font-bold uppercase tracking-widest border px-3 py-1 rounded-full">KELUAR</button>
+       </header>
+       <div class="p-5 border-b bg-white shadow-sm z-10">
+           <div class="grid grid-cols-2 gap-3 mb-4">
+               <div><select id="gmMonth" class="w-full bg-gray-50 border rounded-lg p-3 text-sm font-bold uppercase text-gray-600" onchange="saveGMFilter()">${monthOptions}</select></div>
+               <div><select id="gmYear" class="w-full bg-gray-50 border rounded-lg p-3 text-sm font-bold uppercase text-gray-600" onchange="saveGMFilter()">${yearOptions}</select></div>
+           </div>
+           <button onclick="fetchDashboardData()" class="w-full py-4 bg-black text-white rounded-xl font-bold uppercase text-xs tracking-wider shadow-md">TARIK DATA ANALITIK</button>
+       </div>
+       <main class="flex-1 overflow-y-auto p-5 pb-10">${dashboardContent}</main>
+   </div>`;
+}
+
+window.loginAs = function(role) { AppState.role = role; AppState.menu = 'select_report'; localStorage.setItem('zc_role', role); if (role === 'GM') fetchDashboardData(); else renderApp(); }
+window.logout = function() { AppState.role = null; localStorage.clear(); window.location.reload(); }
+window.openForm = function(type) { form.type = type; AppState.menu = 'form_' + type; AppState.currentTab = 1; renderApp(); }
+window.goBackMenu = function() { AppState.menu = 'select_report'; renderApp(); }
+window.switchTab = function(idx) { AppState.currentTab = idx; renderApp(); }
+
+window.handleDirectInput = function(path, val) {
+   const parts = path.split('.'); let current = form;
+   for (let i = 0; i < parts.length - 1; i++) current = current[parts[i]];
+   current[parts[parts.length - 1]] = val;
+}
+
+window.handleNestedMoney = function(path, val, el) {
+   const cleanNum = val.replace(/[^0-9]/g, '');
+   handleDirectInput(path, cleanNum === "" ? null : Number(cleanNum));
+   if (el) {
+       let start = el.selectionStart;
+       let oldLength = el.value.length;
+       el.value = cleanNum ? new Intl.NumberFormat('id-ID').format(cleanNum) : '';
+       let newLength = el.value.length;
+       try { el.setSelectionRange(start + (newLength - oldLength), start + (newLength - oldLength)); } catch(e) {}
+   }
+}
+
+window.handleMoneyInput = function(path, val, el) { handleNestedMoney(path, val, el); }
+
+window.addAudit = function() { form.kas.audit.push({ jam: "", qris: null, tunai: null, aktual: null, keterangan: "" }); renderApp(); }
+window.removeAudit = function(idx) { form.kas.audit.splice(idx, 1); renderApp(); }
+window.addStaff = function() {
+   const sel = document.getElementById('staffSelect'); if (!sel.value) return;
+   const s = masterStaff.find(x => x.id == sel.value);
+   form.staff.push({ id: Date.now(), nama: s.nama, posisi: s.posisi, status: 'Hadir', keramahan: 'Tidak', keterangan: '' }); renderApp();
+}
+window.removeStaff = function(idx) { form.staff.splice(idx, 1); renderApp(); }
+window.addQc = function() { form.qc.items.push({ jam: "", nama: "", status: "", keterangan: "" }); renderApp(); }
+window.removeQc = function(idx) { form.qc.items.splice(idx, 1); renderApp(); }
+window.addFeedback = function() { form.feedback.items.push({ jam: "", inisial: "", isi: "", remake: "", respon: "", eskalasi: "Tidak" }); renderApp(); }
+window.removeFeedback = function(idx) { form.feedback.items.splice(idx, 1); renderApp(); }
+window.addFasilitas = function() { form.fasilitas.push({ item: "", status: "", eskalasi: "", keterangan: "", foto: null }); renderApp(); }
+window.removeFasilitas = function(idx) { form.fasilitas.splice(idx, 1); renderApp(); }
+window.addBahan = function() { form.bahan.push({ nama: "", ketersediaan: "", harga: null }); renderApp(); }
+window.removeBahan = function(idx) { form.bahan.splice(idx, 1); renderApp(); }
+
+window.addWeeklyStaff = function() {
+   const sel = document.getElementById('weeklyStaffSelect'); if (!sel.value) return;
+   const s = masterStaff.find(x => x.id == sel.value);
+   form.weekly.staff.push({ id: Date.now(), nama: s.nama, posisi: s.posisi, status: 'Berkembang', alasan: '' }); renderApp();
+}
+window.removeWeeklyStaff = function(idx) { form.weekly.staff.splice(idx, 1); renderApp(); }
+
+window.saveGMFilter = function() {
+   localStorage.setItem('gm_filter_month', document.getElementById('gmMonth').value);
+   localStorage.setItem('gm_filter_year', document.getElementById('gmYear').value);
+}
+
+window.fetchDashboardData = function() {
+   AppState.isLoadingData = true; renderApp();
+   const monthObj = document.getElementById('gmMonth'); const yearObj = document.getElementById('gmYear');
+   const reqMonth = monthObj ? monthObj.value : (localStorage.getItem('gm_filter_month') || "Januari");
+   const reqYear = yearObj ? yearObj.value : (localStorage.getItem('gm_filter_year') || new Date().getFullYear().toString());
+   
+   if (typeof google !== 'undefined' && google.script) {
+       google.script.run.withSuccessHandler(res => {
+           AppState.isLoadingData = false;
+           if (res.status === 'success') { AppState.dashboardData = res.data; showToast("Data Diperbarui"); }
+           else { showToast("GAGAL: " + res.error, true); }
+           renderApp();
+       }).withFailureHandler(err => {
+           AppState.isLoadingData = false; showToast("ERROR: " + err.message, true); renderApp();
+       }).api_gm_fetchReports(reqMonth, reqYear);
+   } else {
+       setTimeout(() => {
+           AppState.isLoadingData = false;
+           AppState.dashboardData = { omsetTotal: 15500000, transaksiTotal: 320, komplainTotal: 2, listLaporan: [{ name: 'Daily_Simulasi', url: '#', dateCreated: '2026-06-26' }] };
+           renderApp();
+       }, 1200);
+   }
+}
+
+window.openPreview = function() {
+   if (!form.supervisor) { showToast("Nama Supervisor Wajib Diisi!", true); return; }
+   let previewHtml = '';
+   if (form.type === 'daily') previewHtml = `<div class='space-y-2'><p class='font-bold text-base border-b pb-1'>LAPORAN HARIAN SHIFT</p><p><strong>Tanggal:</strong> ${form.tanggal}</p><p><strong>Omset:</strong> Rp ${fmtNum((form.penjualan.shift1||0) + (form.penjualan.shift2||0))}</p></div>`;
+   else if (form.type === 'weekly') previewHtml = `<div class='space-y-2'><p class='font-bold text-base border-b pb-1'>LAPORAN MINGGUAN</p><p><strong>Periode:</strong> ${form.periode}</p></div>`;
+   else if (form.type === 'monthly') previewHtml = `<div class='space-y-2'><p class='font-bold text-base border-b pb-1'>LAPORAN BULANAN</p><p><strong>Bulan:</strong> ${form.bulan}</p><p><strong>Total Sales:</strong> Rp ${fmtNum(form.monthly.sales.total)}</p></div>`;
+  
+   document.getElementById('previewContent').innerHTML = previewHtml;
+   document.getElementById('previewModal').classList.remove('hidden');
+}
+
+window.closePreview = function() { document.getElementById('previewModal').classList.add('hidden'); }
+
+window.submitReport = function() {
+   const btn = document.getElementById('btnConfirmSubmit');
+   btn.innerHTML = 'MENGIRIM...'; btn.disabled = true;
+   
+   if (typeof google !== 'undefined' && google.script) {
+       google.script.run.withSuccessHandler(res => {
+           if (res.success) {
+               showToast("LAPORAN BERHASIL DISIMPAN!"); closePreview();
+               setTimeout(() => { AppState.menu = 'select_report'; renderApp(); }, 1500);
+           } else { showToast("GAGAL: " + res.error, true); }
+           btn.innerHTML = 'KIRIM LAPORAN SEKARANG'; btn.disabled = false;
+       }).withFailureHandler(err => {
+           showToast("ERROR JARINGAN: " + err.message, true);
+           btn.innerHTML = 'KIRIM LAPORAN SEKARANG'; btn.disabled = false;
+       }).submitFullReport(JSON.stringify(form));
+   } else {
+       showToast("SIMULASI SUKSES"); closePreview(); btn.disabled = false;
+   }
+}
+
+window.onload = function() { if (AppState.role === 'GM') fetchDashboardData(); else renderApp(); };
+</script>
+</body>
+</html>
